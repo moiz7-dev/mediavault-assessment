@@ -1,8 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { bulkSetStatus } from '@/api/client';
+import { friendlyMessage } from '@/api/errors';
 import { AssetDetail } from '@/features/assets/AssetDetail';
 import { AssetGrid } from '@/features/assets/AssetGrid';
-import { useAssets } from '@/features/assets/useAssets';
+import { useAssetsQuery } from '@/features/assets/useAssetsQuery';
+import { useDebouncedValue } from '@/lib/useDebouncedValue';
+import { useUrlState } from '@/lib/useUrlState';
 import { statusLabel } from '@/lib/format';
 import type { Asset, AssetStatus, AssetQuery } from '@/lib/types';
 
@@ -14,16 +17,66 @@ const SORTS: Array<{ value: NonNullable<AssetQuery['sort']>; label: string }> = 
   { value: 'createdAt:desc', label: 'Newest' },
 ];
 
+interface UrlFilters {
+  [key: string]: string;
+  q: string;
+  status: string;
+  sort: string;
+}
+
+const URL_DEFAULTS: UrlFilters = { q: '', status: '', sort: 'updatedAt:desc' };
+
 export function App() {
-  const [q, setQ] = useState('');
-  const [status, setStatus] = useState<AssetStatus[]>([]);
-  const [sort, setSort] = useState<NonNullable<AssetQuery['sort']>>('updatedAt:desc');
+  const [filters, setFilters] = useUrlState(URL_DEFAULTS);
+
+  // The input box updates instantly; only the debounced value feeds the URL and the API,
+  // so ordinary typing never fires a request or a history write per keystroke.
+  const [qInput, setQInput] = useState(filters.q);
+  const debouncedQ = useDebouncedValue(qInput, 400);
+
+  useEffect(() => {
+    setFilters({ q: debouncedQ });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedQ]);
+
+  // replaceState (used by useUrlState) never fires popstate, so this only ever runs for
+  // real back/forward navigation — it can't fight the effect above.
+  useEffect(() => {
+    const onPopState = () => setQInput(new URLSearchParams(window.location.search).get('q') ?? '');
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  const statusList = useMemo(
+    () => (filters.status ? (filters.status.split(',') as AssetStatus[]) : []),
+    [filters.status],
+  );
+  const sort = (filters.sort || URL_DEFAULTS.sort) as NonNullable<AssetQuery['sort']>;
+
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [activeId, setActiveId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // Every keystroke sends a request. Nothing is debounced or cancelled.
-  const { items, total, loading, error } = useAssets({ q, status, sort, limit: 24 });
+  const {
+    data,
+    isLoading,
+    isError,
+    error,
+    isFetching,
+    refetch,
+  } = useAssetsQuery({
+    q: debouncedQ || undefined,
+    status: statusList.length ? statusList : undefined,
+    sort,
+    limit: 24,
+  });
+
+  const items = data?.items ?? [];
+  const total = data?.total ?? 0;
+
+  function setStatusFilter(next: AssetStatus[]) {
+    setFilters({ status: next.join(',') });
+  }
 
   function toggleSelect(id: string) {
     setSelectedIds((prev) => {
@@ -44,7 +97,7 @@ export function App() {
       setNotice(`${result.applied} updated, ${result.failed} failed.`);
       setSelectedIds(new Set());
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : 'Bulk update failed');
+      setNotice(friendlyMessage(err));
     }
   }
 
@@ -60,10 +113,10 @@ export function App() {
           className="search"
           type="search"
           placeholder="Search assets"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
+          value={qInput}
+          onChange={(e) => setQInput(e.target.value)}
         />
-        <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}>
+        <select value={sort} onChange={(e) => setFilters({ sort: e.target.value })}>
           {SORTS.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
@@ -77,10 +130,10 @@ export function App() {
           <label key={s}>
             <input
               type="checkbox"
-              checked={status.includes(s)}
+              checked={statusList.includes(s)}
               onChange={(e) =>
-                setStatus((prev) =>
-                  e.target.checked ? [...prev, s] : prev.filter((x) => x !== s),
+                setStatusFilter(
+                  e.target.checked ? [...statusList, s] : statusList.filter((x) => x !== s),
                 )
               }
             />
@@ -88,7 +141,9 @@ export function App() {
           </label>
         ))}
         <span className="muted">
-          {loading ? 'Loading…' : `${items.length} of ${total.toLocaleString()} shown`}
+          {isLoading
+            ? 'Loading…'
+            : `${items.length} of ${total.toLocaleString()} shown${isFetching ? ' · Updating…' : ''}`}
         </span>
       </div>
 
@@ -105,16 +160,26 @@ export function App() {
       )}
 
       {notice && <p className="notice">{notice}</p>}
-      {error && <p className="error">{error}</p>}
 
       <main className="content">
-        <AssetGrid
-          assets={items}
-          selectedIds={selectedIds}
-          activeId={activeId}
-          onToggleSelect={toggleSelect}
-          onOpen={setActiveId}
-        />
+        {isError ? (
+          <div className="empty">
+            <p className="error">{friendlyMessage(error)}</p>
+            <button onClick={() => refetch()}>Try again</button>
+          </div>
+        ) : isLoading ? (
+          <div className="empty">
+            <p className="muted">Loading assets…</p>
+          </div>
+        ) : (
+          <AssetGrid
+            assets={items}
+            selectedIds={selectedIds}
+            activeId={activeId}
+            onToggleSelect={toggleSelect}
+            onOpen={setActiveId}
+          />
+        )}
         {activeId && (
           <AssetDetail id={activeId} onClose={() => setActiveId(null)} onSaved={handleSaved} />
         )}

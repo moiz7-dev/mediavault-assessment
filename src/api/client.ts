@@ -1,15 +1,5 @@
+import { ApiError, NetworkError, isAbortError } from '@/api/errors';
 import type { Asset, AssetPage, AssetQuery, BulkResult } from '@/lib/types';
-
-/**
- * Baseline client. It works on a good network and falls apart on a bad one.
- *
- * Known gaps, all of which are yours to close:
- *   - no request cancellation
- *   - no retry, no backoff, no handling of Retry-After
- *   - no de-duplication of concurrent identical requests
- *   - error information is flattened into a string
- *   - callers cannot distinguish "retry this" from "do not retry this"
- */
 
 function toSearchParams(query: AssetQuery): string {
   const params = new URLSearchParams();
@@ -26,34 +16,48 @@ function toSearchParams(query: AssetQuery): string {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
-  });
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      ...init,
+      headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
+    });
+  } catch (err) {
+    if (isAbortError(err)) throw err;
+    throw new NetworkError();
+  }
+
   if (!res.ok) {
-    let detail = res.statusText;
+    let code = 'unknown';
+    let message = res.statusText;
     try {
       const body = await res.json();
-      detail = body?.error?.message ?? detail;
+      code = body?.error?.code ?? code;
+      message = body?.error?.message ?? message;
     } catch {
       /* response was not JSON */
     }
-    throw new Error(`${res.status}: ${detail}`);
+    const retryAfterHeader = res.headers.get('retry-after');
+    throw new ApiError(res.status, code, message, retryAfterHeader ? Number(retryAfterHeader) : null);
   }
+
   return res.json() as Promise<T>;
 }
 
-export function listAssets(query: AssetQuery): Promise<AssetPage> {
-  return request<AssetPage>(`/api/assets?${toSearchParams(query)}`);
+export function listAssets(query: AssetQuery, signal?: AbortSignal): Promise<AssetPage> {
+  return request<AssetPage>(`/api/assets?${toSearchParams(query)}`, { signal });
 }
 
-export function getAsset(id: string): Promise<Asset> {
-  return request<Asset>(`/api/assets/${id}`);
+export function getAsset(id: string, signal?: AbortSignal): Promise<Asset> {
+  return request<Asset>(`/api/assets/${id}`, { signal });
 }
 
-export function getAssetsByIds(ids: string[]): Promise<{ items: Asset[]; missing: string[] }> {
-  // Note: the endpoint rejects more than 25 ids per call.
-  return request(`/api/assets/batch?ids=${ids.join(',')}`);
+export function getAssetsByIds(
+  ids: string[],
+  signal?: AbortSignal,
+): Promise<{ items: Asset[]; missing: string[] }> {
+  // Note: the endpoint rejects more than 25 ids per call — callers must chunk.
+  return request(`/api/assets/batch?ids=${ids.join(',')}`, { signal });
 }
 
 export function updateAsset(
@@ -68,7 +72,7 @@ export function updateAsset(
 }
 
 export function bulkSetStatus(ids: string[], status: Asset['status']): Promise<BulkResult> {
-  // Note: the endpoint rejects more than 50 ids per call.
+  // Note: the endpoint rejects more than 50 ids per call — callers must chunk.
   return request<BulkResult>('/api/assets/bulk-status', {
     method: 'POST',
     body: JSON.stringify({ ids, status }),

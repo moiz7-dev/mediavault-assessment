@@ -62,15 +62,72 @@ six of these is about right.
 
 **Data fetching and caching**
 
+TanStack Query, not a hand-rolled `useEffect` fetcher. It gives three of Task 1's
+requirements for free as long as the `queryFn` forwards the `AbortSignal` it's
+handed to `fetch`: per-key request de-duplication, cancellation of a query's
+in-flight fetch when it loses its last observer (i.e. when the filters change),
+and a `retry`/`retryDelay` hook that receives the actual error object, not just
+a boolean — which is what makes the Task 4 backoff policy structural instead of
+string-matched. Chose it over SWR mainly for `useInfiniteQuery`'s explicit
+`pageParam`/`getNextPageParam` shape, which maps directly onto this API's
+opaque-cursor contract (Task 2).
+
 **Stale response handling**
+
+Two layers, deliberately not just one:
+1. **Debounce (400ms)** on the search input before it touches the query key or
+   the URL at all — see `useDebouncedValue.ts` for the exact reasoning. This is
+   the main defense against request volume (a 6-character query is 1 request,
+   not 6) and against ever sending the API's slowest path (1-2 char prefixes)
+   for a query the user was only passing through.
+2. **Per-key cache isolation** — verified against the exact repro in the
+   README (`tra` → `trail`): even when the `tra` request is still in flight
+   when `trail`'s fires, `trail`'s response can never be overwritten by a late
+   `tra` response, because they're different cache entries and the component
+   only ever reads the entry for its *current* query key. Confirmed with a
+   scripted Playwright run typing through the race with the `tra` request
+   deliberately left in flight — final rendered rows and URL both reflect
+   `trail` regardless of which HTTP response lands first. This holds even if
+   cancellation didn't fire at all, which is a stronger guarantee than a manual
+   `AbortController` + "ignore stale response" flag would give.
+
+Cancellation still happens where it can (confirmed via the network log — a
+superseded query's fetch shows `net::ERR_ABORTED`), which is what stops "no
+longer wanted" requests from continuing to burn the 80-req/10s budget.
 
 **Virtualization approach**
 
+*(Task 2)*
+
 **Optimistic updates and rollback**
+
+*(Task 3)*
 
 **Retry and backoff policy**
 
+Landed earlier than Task 4 proper because Task 1 needed it: without a retry,
+the ~6% baseline `503` rate on `GET /api/assets` would surface as a visible
+error on roughly 1 in 17 searches, which fails Task 1's "loading/empty/error
+must be distinguishable and correct" bar on its own. `queryClient.ts` centralises
+it: `retryDelay` honours `Retry-After` exactly (plus a small jitter) when the
+server gives one, otherwise exponential backoff with equal jitter (50-100% of
+`min(500 * 2^attempt, 8000)`ms); `retry` checks `ApiError.retryable`, which is
+computed structurally from HTTP status (`429`/`503`/`500` only) in
+`api/errors.ts` — never from message text. Capped at 4 attempts. Task 4 extends
+this to mutations, offline detection, and an error boundary.
+
 **State placement and URL sync**
+
+`q` (debounced), `status` and `sort` live in the URL via a small hand-rolled
+`useUrlState` hook rather than a router — this app has exactly one screen, so
+React Router's route matching would be pure overhead for what is really just
+`URLSearchParams` synced with component state. Always uses `history.replaceState`,
+never `pushState`: filter and search changes are frequent enough that one
+history entry per change would make the back button useless for real
+navigation, and the brief only requires reload/share to restore the view, not
+that back/forward step through every filter tweak. Verified: reloading
+`/?q=trail&status=approved&sort=name:asc` restores the search box, the checkbox,
+the sort dropdown and the filtered/sorted rows exactly.
 
 ---
 
