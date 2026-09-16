@@ -412,13 +412,88 @@ Screenshots: [`docs/screenshots/grid.png`](docs/screenshots/grid.png),
 
 ## Trade-offs and cuts
 
-What you deliberately did not do, and what you would do with another day.
+Deliberately skipped, all three optional items — none of Tasks 0-6 felt
+solid enough to spend the remaining time on a bonus instead:
+
+- **Live updates (`GET /api/events`)** — not implemented. Reconciling an SSE
+  `asset.updated` push with an optimistic-update cache that's mid-flight on a
+  bulk action (Task 3) without clobbering either is a real design problem,
+  not a quick add, and Tasks 0-5 carry more signal per the brief's own
+  ordering.
+- **Tests** — none written. The brief is explicit that sharp concurrency/
+  rollback tests beat broad shallow coverage, and I spent the equivalent
+  effort as scripted Playwright verification instead (documented inline
+  throughout this file) — real assertions against the running app under
+  real chaos, not mocks. I'd trade some of that for a handful of unit tests
+  around `useBulkStatus`'s chunking/rollback logic specifically, if I had
+  more time — that's the one piece I'd actually want a regression net around.
+- **`/api/stats`** — never called. Nothing in the brief for Tasks 0-6 needed
+  library-wide counts, so there was nothing to make non-blocking.
+
+Cut within the required tasks, smaller scope decisions:
+
+- **Undo, not offered** for bulk actions — only retry for the failed subset.
+  The brief allows either; retry directly addresses the two documented
+  failure reasons (legal_hold/conflict), while undo would need to revert
+  each succeeded id to its own *individual* prior status (not one shared
+  value), which is a materially bigger feature for less payoff here.
+- **Shift+arrow range selection** extends/shrinks from the last plain
+  action, not full "drag in any direction across multiple prior ranges"
+  spreadsheet semantics — simpler, still correct for a gallery grid (see
+  Accessibility → Known gaps).
+- **No screen reader audio pass** — semantics verified against the real
+  accessibility tree, not heard. Disclosed rather than claimed.
+- **kind/tag/collectionId/owner filters** exist in the API and the type
+  system (`AssetQuery`) but have no UI — the baseline never exposed them
+  either, and adding filter UI wasn't a stated defect or requirement. Left
+  alone rather than scope-creeping Task 6 into new features.
+
+With another day: SSE reconciliation first (it's the most interesting
+remaining problem), then the `useBulkStatus` unit tests, then a second pass
+on mobile/narrow polish beyond "doesn't break."
 
 ## Critique of the API
 
-What you would change about the backend contract, and what it forced you to do in
-the client that you would rather not have.
+- **Bulk vs single-asset legal-hold rules disagree.** `PATCH /api/assets/:id`
+  only blocks `legal-hold` assets from moving to `archived`, but
+  `POST /api/assets/bulk-status` blocks a `legal-hold` asset from *any*
+  status change (confirmed in `server/data.mjs`/`server/index.mjs`). A
+  reviewer who successfully sets a legal-hold asset to `in_review` one at a
+  time, then selects it in a batch with others, sees it fail for a reason
+  the single-asset endpoint wouldn't have raised. I built the client to
+  match whichever endpoint the user actually hits (which is contract-correct)
+  but had to explain this asymmetry to myself once I noticed the failure
+  counts didn't match my mental model — worth reconciling one way or the other.
+- **Bulk-status has no `version`.** Every single-asset write is
+  optimistic-concurrency-safe; a bulk write to an asset someone just edited
+  elsewhere just silently overwrites their change (no `409` possible, by
+  design). Given the brief's own scenario — many reviewers working the same
+  library — that's a real gap, not just a client inconvenience.
+- **`stale_cursor`'s fingerprint excludes `limit`.** Convenient (I can page
+  size independently of the filter fingerprint) but slightly surprising the
+  first time you read `server/index.mjs`'s `fingerprint()` — worth a line in
+  `API.md` saying explicitly which params are and aren't part of a cursor's
+  identity.
+- **No per-request client identifier for the rate limiter** — it's keyed by
+  IP (`req.socket.remoteAddress`), fine for local dev, but worth flagging
+  since it means every user behind the same NAT/proxy in a real deployment
+  shares one 80-req/10s budget.
 
 ## Anything you would like us to look at
 
-Code you are proud of, or a decision you are unsure about and want to discuss.
+- **`useBulkStatus.ts`** — the whole optimistic/chunk/rollback flow in one
+  place. It's the piece I'd most want to walk through live: why the snapshot
+  happens once up front rather than per-chunk, and why a fully-failed chunk
+  (network down mid-batch) has to be treated as a per-id failure rather than
+  a single top-level error.
+- **The two "false alarm" investigations in SUBMISSION.md** (search for
+  "false alarm") — both looked like real app bugs (scroll resetting to 0,
+  focus restoration breaking scroll position) and both turned out to be the
+  *test* clicking something a real mouse never could. I left the reasoning
+  in rather than cleaning it up, because I think how I ruled out "is this
+  real" is more informative than a diff with the dead ends removed.
+- **Genuinely unsure about:** the detail panel's 409 behaviour (refetch +
+  ask the user to re-confirm, rather than any kind of merge or silent
+  retry). I think it's the safer default, but "what should happen when two
+  people edit the same asset" doesn't have one obviously-correct answer, and
+  I'd like to hear how you'd want it to behave.
