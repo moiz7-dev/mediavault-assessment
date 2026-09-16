@@ -285,7 +285,7 @@ real dev app with chaos/latency on, not the browser's own DevTools UI — see
 | Cards re-rendered when toggling one selection | All mounted cards (`AssetGrid` had no memo boundary, no stable callbacks) — not independently re-measured on the old code, stated qualitatively rather than guessed a number | **1 of 21** mounted cards | Dev-only counter (`window.__mvRenderCounts`, guarded by `import.meta.env.DEV`) incremented in `AssetCard`'s render body, read before/after a real checkbox click. Only the toggled card's count changed; all 20 others were bit-for-bit identical |
 | Longest task during sustained scroll | Not measured — same N/A as above (feature didn't exist to stress) | **0 tasks over 50ms** across a 150-step sustained scroll with 2,208+ rows loaded | `PerformanceObserver({type:'longtask'})` recording during a scripted incremental scroll (60px/16ms steps, ~150 steps) |
 | Requests fired while typing a 6-character query | **6** (one per keystroke — no debounce) | **1** | Counted `request` events matching `/api/assets\?` while typing "camera" at a 60ms/char cadence (well under the 400ms debounce window) |
-| Production bundle, gzipped | 48 kB (stated baseline) | **~70.5 kB** (69.32 kB JS + 1.23 kB CSS) | `npm run build` output |
+| Production bundle, gzipped | 48 kB (stated baseline) | **~74.1 kB** (72.21 kB JS + 1.91 kB CSS, final) | `npm run build` output |
 
 The bundle grew about 22.5 kB over baseline — entirely TanStack Query +
 TanStack Virtual. That's a real jump and worth justifying rather than waving
@@ -354,18 +354,59 @@ oversight.
 
 ## Interface decisions
 
-Three or four sentences: what you were optimising for, and the decisions that
-follow from it. Then briefly:
+Optimising for a reviewer scanning hundreds of cards under real chaos: status
+has to read at a glance without relying on colour, every non-happy state
+(loading, empty, error, offline, partial failure) needs to look like a
+different thing rather than a variation on "blank", and none of it should
+need a design tool or an icon library to justify. Everything below is CSS
+custom properties and existing DOM — no illustration, no motion, no dark
+mode, per the brief.
 
-- **Visual system.** Your colour, spacing and type decisions, and where they live.
-- **Status treatment.** How the four statuses read as a progression, and how they
-  stay distinguishable without relying on colour.
-- **States.** What you did with loading, empty, error, offline and partial
-  failure.
-- **Contrast.** What you checked against, and with what.
-- **Copy.** Any user-facing message you rewrote and why.
+- **Visual system.** All colour, spacing, radius and type live as `:root`
+  custom properties in `styles.css` (`--ink`, `--ink-soft`, `--line` /
+  `--line-soft`, `--accent`, `--danger`, a `--space-1…5` scale, `--radius-*`).
+  Two border tokens on purpose: `--line` meets the 3:1 UI-component threshold
+  for things whose edge matters (inputs, selects, checkboxes), `--line-soft`
+  is decorative (card edges, dividers) where spacing already carries the
+  structure — so a reader of the tokens can tell which borders are load-bearing.
+- **Status treatment.** `StatusBadge` renders status as a 4-dot progression
+  (draft=1 dot lit, in review=2, approved=3, archived=4) plus the label — the
+  *count* is the primary signal, so it still reads correctly for someone who
+  can't distinguish the tint, or on a greyscale printout. The tint/label are
+  the faster secondary scan for everyone else. See `docs/screenshots/grid.png`.
+- **States.** Loading, empty and error are three visually distinct outcomes,
+  not one collapsing into another (the baseline's actual bug — see defect
+  #14): empty is plain and quiet ("nothing to see, not broken"), error gets a
+  `--danger`-tinted box with a retry action, offline gets a full-width amber
+  banner that's impossible to miss but doesn't block the rest of the UI, and
+  a partial bulk failure gets its own panel naming exactly which assets
+  failed and why, with a scoped retry action (`docs/screenshots/bulk-outcome.png`).
+- **Contrast.** Computed with the actual WCAG relative-luminance formula (a
+  small Node script, not a browser extension or eyeballing) against every
+  colour pair actually in use. Body text (`--ink` on white) is 17.76:1;
+  secondary text (`--ink-soft`) is 6.13:1 on white and 5.62:1 on `--bg-soft`,
+  both clearing the 4.5:1 AA text threshold with room to spare; `--accent` and
+  `--danger` on white are 6.63:1 and 6.54:1; the darkened `--line` border used
+  on real controls is 3.18:1, clearing the 3:1 AA non-text threshold; all four
+  status dot colours clear 3:1 against white (3.21–6.13:1). Full pairs and
+  numbers are in the script output, reproducible on request.
+- **Copy.** `friendlyMessage`/`describeBulkFailure` (Tasks 1/3/4) already
+  replaced every raw `"429: Too many requests…"`-shaped string; Task 6 added
+  the last two gaps — `bad_request` and `bad_cursor` — so no HTTP-shaped text
+  can reach the user even from an edge case the UI can't normally trigger
+  (e.g. a hand-edited URL with an invalid sort). The offline banner, bulk
+  outcome summary and empty-state copy were all written as plain sentences a
+  non-technical reviewer would say out loud, not error-log text.
+- **Narrow window.** At ≤720px the detail panel and grid stack instead of
+  sitting side by side; the grid keeps a genuinely usable ~38vh scrollable
+  strip rather than shrinking to a sliver when the panel is open, and the
+  panel gets the rest (`docs/screenshots/detail-panel.png` is the wide
+  layout; verified narrow separately by resizing to 375px and confirming
+  no overlap and single-column cards).
 
-Screenshots in the repo are welcome — link them here.
+Screenshots: [`docs/screenshots/grid.png`](docs/screenshots/grid.png),
+[`docs/screenshots/detail-panel.png`](docs/screenshots/detail-panel.png),
+[`docs/screenshots/bulk-outcome.png`](docs/screenshots/bulk-outcome.png).
 
 ---
 

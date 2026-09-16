@@ -3,6 +3,7 @@ import type { KeyboardEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { thumbnailUrl } from '@/api/client';
 import { formatBytes, formatDate, statusLabel } from '@/lib/format';
+import { StatusBadge } from '@/features/assets/StatusBadge';
 import type { Asset } from '@/lib/types';
 
 const MIN_CARD_WIDTH = 220;
@@ -75,7 +76,7 @@ export const AssetCard = memo(function AssetCard({
         <p className="muted">
           {asset.kind} · {formatBytes(asset.sizeBytes)} · {formatDate(asset.updatedAt)}
         </p>
-        <span className={`pill pill--${asset.status}`}>{statusLabel(asset.status)}</span>
+        <StatusBadge status={asset.status} />
       </div>
       <input
         type="checkbox"

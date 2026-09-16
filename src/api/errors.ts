@@ -53,9 +53,13 @@ const FRIENDLY_MESSAGES: Record<string, string> = {
   not_found: 'That asset no longer exists.',
   too_many_ids: 'Too many items selected for one request.',
   thumbnail_missing: 'No preview image for this asset.',
+  bad_request: "That request wasn't valid. Try again.",
+  bad_cursor: 'The list changed — resetting to the top.',
 };
 
 export function friendlyMessage(err: unknown): string {
+  // Falls back to err.message (the server's own text) only for codes we don't recognise yet —
+  // never to the raw "429: Too many requests..." shape the baseline client used to produce.
   if (err instanceof ApiError) return FRIENDLY_MESSAGES[err.code] ?? err.message;
   if (err instanceof NetworkError) return "You're offline — reconnect and we'll retry.";
   if (err instanceof Error) return 'Something went wrong. Please try again.';

@@ -1,11 +1,43 @@
+/*
+ * Design tokens. Colours are picked and checked against WCAG AA rather than eyeballed —
+ * see SUBMISSION.md "Contrast" for the actual computed ratios. Two border tokens on purpose:
+ * --line meets the 3:1 UI-component threshold for things whose boundary matters (inputs,
+ * selects, checkboxes, buttons); --line-soft is decorative only (card edges, dividers) where
+ * spacing and background already carry the structure.
+ */
 :root {
-  --ink: #1b1d21;
-  --ink-soft: #62676f;
-  --line: #d9dce1;
+  --ink: #16181d;
+  --ink-soft: #5b6270;
   --bg: #ffffff;
-  --bg-soft: #f5f6f8;
-  --accent: #2b5fd9;
-  --danger: #a5301f;
+  --bg-soft: #f4f5f7;
+  --line: #8a919a;
+  --line-soft: #dde1e6;
+  --accent: #2454c7;
+  --accent-tint: #eaf0fd;
+  --danger: #b3261e;
+  --danger-tint: #fbeceb;
+
+  --status-draft: #767c86;
+  --status-draft-tint: #eef0f2;
+  --status-review: #a15c00;
+  --status-review-tint: #fff2df;
+  --status-approved: #1f7a3d;
+  --status-approved-tint: #e3f5e9;
+  --status-archived: #5b6270;
+  --status-archived-tint: #e9ebee;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-pill: 999px;
+
+  --font-sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+
   color-scheme: light;
 }
 
@@ -15,21 +47,25 @@
 
 body {
   margin: 0;
-  font: 15px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font: 15px/1.5 var(--font-sans);
   color: var(--ink);
   background: var(--bg);
 }
 
 h1 {
-  font-size: 18px;
+  font-size: 19px;
+  font-weight: 700;
   margin: 0;
+  letter-spacing: -0.01em;
 }
 h2 {
   font-size: 16px;
+  font-weight: 600;
   margin: 0;
 }
 h3 {
   font-size: 15px;
+  font-weight: 600;
   margin: 12px 0 4px;
 }
 p {
@@ -44,18 +80,26 @@ input {
 }
 
 button {
-  padding: 5px 10px;
+  padding: 6px 12px;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
   cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
 }
 button:hover:not(:disabled) {
   background: var(--bg-soft);
 }
 button:disabled {
   color: var(--ink-soft);
+  border-color: var(--line-soft);
   cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
 }
 
 :focus-visible {
@@ -88,26 +132,30 @@ button:disabled {
 
 .topbar {
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: var(--space-3);
   align-items: center;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--line);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .search {
-  flex: 1;
+  flex: 1 1 200px;
   max-width: 380px;
-  padding: 6px 10px;
+  padding: 7px 10px;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
 }
 
 .filters {
   display: flex;
-  gap: 16px;
+  flex-wrap: wrap;
+  row-gap: var(--space-2);
+  column-gap: var(--space-4);
   align-items: center;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--line);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--line-soft);
   background: var(--bg-soft);
 }
 .filters label {
@@ -119,47 +167,66 @@ button:disabled {
 
 .bulkbar {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: var(--space-2);
   align-items: center;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--line);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--accent-tint);
+}
+.bulkbar span:first-child {
+  font-weight: 600;
+  margin-right: var(--space-1);
 }
 
-.notice,
-.error {
+.notice {
   margin: 0;
-  padding: 8px 16px;
+  padding: var(--space-2) var(--space-4);
   font-size: 13px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-soft);
 }
 .error {
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  font-size: 13px;
   color: var(--danger);
+  background: var(--danger-tint);
+  border-bottom: 1px solid var(--line-soft);
+}
+.empty .error {
+  display: inline-block;
+  border-radius: var(--radius-sm);
+  border-bottom: none;
 }
 
 .offline-banner {
   margin: 0;
-  padding: 8px 16px;
+  padding: var(--space-2) var(--space-4);
   font-size: 13px;
+  font-weight: 500;
   text-align: center;
-  background: #fff4e0;
+  color: #5b3d00;
+  background: var(--status-review-tint);
   border-bottom: 1px solid #ecd3a2;
 }
 
 .bulk-outcome {
-  padding: 10px 16px;
+  padding: var(--space-3) var(--space-4);
   font-size: 13px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-soft);
   background: var(--bg-soft);
 }
 .bulk-outcome p {
   margin: 0 0 4px;
+  font-weight: 500;
 }
 .bulk-outcome__list {
   margin: 4px 0;
   padding-left: 18px;
+  color: var(--ink-soft);
 }
 .bulk-outcome button {
-  margin-top: 4px;
+  margin-top: var(--space-1);
   margin-right: 6px;
 }
 
@@ -173,36 +240,38 @@ button:disabled {
   flex: 1;
   overflow: auto;
   position: relative;
-  padding: 16px;
+  padding: var(--space-4);
 }
 
 .grid-row {
   display: grid;
-  gap: 12px;
-  padding-bottom: 12px;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
   box-sizing: border-box;
 }
 
 .grid-loading-more {
   grid-column: 1 / -1;
   text-align: center;
-  padding: 8px 0 0;
+  padding: var(--space-2) 0 0;
 }
 
 .card {
   position: relative;
-  border: 1px solid var(--line);
-  border-radius: 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
   overflow: hidden;
   background: var(--bg);
   cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 .card--selected {
   border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 .card--active {
   border-color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink);
 }
 .card__thumb {
   display: block;
@@ -215,51 +284,88 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, var(--bg-soft), var(--line));
+  background: linear-gradient(135deg, var(--bg-soft), var(--line-soft));
 }
 .card__body {
-  padding: 8px 10px 10px;
+  padding: var(--space-2) var(--space-3) var(--space-3);
 }
 .card__name {
   margin: 0 0 2px;
   font-weight: 600;
   font-size: 14px;
+  line-height: 1.35;
+  /* Names run long; clip at two lines instead of pushing every card to a different height. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .card__check {
   position: absolute;
-  top: 8px;
-  left: 8px;
+  top: var(--space-2);
+  left: var(--space-2);
   width: 18px;
   height: 18px;
+  accent-color: var(--accent);
+  /* A thumbnail can be any colour — a plain white backdrop keeps the checkbox legible against
+     all of them instead of just the ones it happens to contrast with. */
+  background: var(--bg);
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
 }
 
-.pill {
-  display: inline-block;
+/*
+ * Status reads as a 4-step progression (draft -> in review -> approved -> archived): the dot
+ * count is the primary signal, so it survives colour-blindness or a greyscale printout; the
+ * tint and label are the secondary, faster-to-scan cues for someone who can see colour.
+ */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   margin-top: 6px;
-  padding: 1px 7px;
-  border-radius: 10px;
+  padding: 2px 8px 2px 6px;
+  border-radius: var(--radius-pill);
   font-size: 12px;
-  background: var(--bg-soft);
-  border: 1px solid var(--line);
+  font-weight: 500;
 }
-.pill--approved {
-  background: #e6f4ea;
-  border-color: #b7dfc4;
+.status--draft {
+  background: var(--status-draft-tint);
+  color: var(--status-draft);
 }
-.pill--in_review {
-  background: #fff4e0;
-  border-color: #ecd3a2;
+.status--in_review {
+  background: var(--status-review-tint);
+  color: var(--status-review);
 }
-.pill--archived {
-  color: var(--ink-soft);
+.status--approved {
+  background: var(--status-approved-tint);
+  color: var(--status-approved);
+}
+.status--archived {
+  background: var(--status-archived-tint);
+  color: var(--status-archived);
+}
+.status__dots {
+  display: inline-flex;
+  gap: 2px;
+}
+.status__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.28;
+}
+.status__dot--filled {
+  opacity: 1;
 }
 
 .panel {
-  width: 340px;
+  width: 360px;
   flex-shrink: 0;
-  border-left: 1px solid var(--line);
+  border-left: 1px solid var(--line-soft);
   overflow: auto;
-  padding: 12px 16px 32px;
+  padding: var(--space-3) var(--space-4) var(--space-5);
 }
 .panel__head {
   display: flex;
@@ -268,16 +374,16 @@ button:disabled {
 }
 .panel__thumb {
   width: 100%;
-  border-radius: 6px;
-  margin-top: 12px;
+  border-radius: var(--radius-md);
+  margin-top: var(--space-3);
   background: var(--bg-soft);
 }
 
 .facts {
   display: grid;
   grid-template-columns: 90px 1fr;
-  gap: 2px 8px;
-  margin: 8px 0;
+  gap: 2px var(--space-2);
+  margin: var(--space-2) 0;
   font-size: 13px;
 }
 .facts dt {
@@ -292,14 +398,15 @@ button:disabled {
   flex-wrap: wrap;
   gap: 4px;
   padding: 0;
-  margin: 8px 0;
+  margin: var(--space-2) 0;
   list-style: none;
 }
 .tags li {
   font-size: 12px;
   padding: 1px 7px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-pill);
+  color: var(--ink-soft);
 }
 
 .row {
@@ -309,7 +416,12 @@ button:disabled {
 }
 
 .empty {
-  padding: 48px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: 48px var(--space-4);
   text-align: center;
   flex: 1;
 }
@@ -318,9 +430,18 @@ button:disabled {
   .content {
     flex-direction: column;
   }
+  /* Stacked, not split evenly: the grid keeps a usable scrollable strip instead of shrinking
+     to a sliver, and the open panel — the thing the user just asked for — gets the rest. */
+  .grid-scroll {
+    flex: 0 0 38vh;
+  }
   .panel {
+    flex: 1;
     width: 100%;
     border-left: none;
-    border-top: 1px solid var(--line);
+    border-top: 1px solid var(--line-soft);
+  }
+  .search {
+    max-width: none;
   }
 }

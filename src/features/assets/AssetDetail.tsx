@@ -3,6 +3,7 @@ import type { KeyboardEvent } from 'react';
 import { getAsset, thumbnailUrl, updateAsset } from '@/api/client';
 import { ApiError, friendlyMessage, isAbortError } from '@/api/errors';
 import { formatBytes, formatDate, formatDuration, statusLabel } from '@/lib/format';
+import { StatusBadge } from '@/features/assets/StatusBadge';
 import { withRetry } from '@/lib/retry';
 import type { Asset, AssetStatus } from '@/lib/types';
 
@@ -139,6 +140,7 @@ export function AssetDetail({ id, isOnline, onClose, onSaved }: Props) {
           )}
 
           <p className="muted">Status</p>
+          <StatusBadge status={asset.status} />
           <div className="row">
             {STATUSES.map((status) => (
               <button
