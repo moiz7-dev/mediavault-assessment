@@ -123,11 +123,74 @@ for `useVirtualizer` and is kept.
 
 **Optimistic updates and rollback**
 
-*(Task 3)*
+Every selected id is patched to the new status directly in TanStack Query's
+infinite-query cache *before* any request is sent (`useBulkStatus.apply`,
+`patchAssetsInCache`) — confirmed the grid re-paints within 50ms of clicking,
+well before the server's 90ms+ baseline latency could plausibly have returned
+anything. Ids are chunked to the 50-id server cap and sent with bounded
+concurrency (3 chunks in flight at once, not all of them — the brief is
+explicit that firing 40 parallel requests is the wrong answer). Each chunk's
+own per-id `results` array then either confirms that id with the authoritative
+asset the server returned, or rolls back *only that id* to whatever status it
+had before the batch started — a snapshot taken once, up front, per id, so a
+partially-successful batch never loses track of what to roll a given id back
+to. Verified with a 96-id "select all loaded" batch under real chaos: 77
+succeeded, 19 failed (13 `legal_hold`, 6 `conflict`), and only the 19 failing
+rows kept their original status.
 
-**Optimistic updates and rollback**
+The two failure reasons get different treatment, per the brief's hint that one
+of them never succeeds on retry: `legal_hold` is deterministic (anything
+tagged `legal-hold` always fails, confirmed against `server/data.mjs`), so
+those rows are reported but never offered a retry; `conflict` is a random ~7%
+and *is* retryable, so a "Retry N failed" button appears counting only those.
+Retrying the 6 `conflict` failures from that same run succeeded on all 6.
+`not_found` (asset deleted from under you) is treated like `legal_hold` — no
+retry, since the id is simply gone.
 
-*(Task 3)*
+A chunk that fails entirely (retries exhausted on a transient error, not a
+per-id rejection) is treated as every id in it failing, so nothing is left
+stuck in a "confirmed" state that never actually confirmed.
+
+**Single-asset conflict (`409 version_conflict`) in the detail panel:** on
+conflict, the panel refetches the asset and shows a plain-language notice
+("This asset changed elsewhere — refreshed to the latest version. Choose a
+status again to apply your change.") rather than silently retrying the write
+with the new version. Justification: a version conflict means someone else's
+change already landed, and we don't know whether the user's intended status
+still makes sense against whatever they changed it to — silently reapplying
+could clobber a concurrent edit the user never saw. Refetching and asking for
+one more click costs little and guarantees the user is looking at current
+state before deciding. Verified end-to-end: forced a real 409 by PATCHing the
+same asset directly while the panel held a stale version, confirmed the panel
+showed the conflict notice and the freshly-changed name, then confirmed a
+second click against the refreshed version saved cleanly.
+
+Saving from the detail panel also patches the same cache (`handleSaved` →
+`patchAssetsInCache`) so the grid reflects the edit immediately — this closes
+baseline defect #12, where `onSaved` was a documented no-op and the grid kept
+showing the stale row after an edit; confirmed the grid card's name/status
+update without a refetch after closing the panel.
+
+**Range selection:** click selects one id and sets it as the anchor;
+shift-click selects the contiguous range between the anchor and the clicked
+id (added to, not replacing, the existing selection — a plain checkbox click
+elsewhere shouldn't feel like it wiped out an unrelated prior selection). The
+anchor is a ref, not state, so `toggleSelect` keeps one stable identity across
+renders — required for `AssetCard`'s memo to keep working during a selection
+change. "Select all loaded" selects every currently-fetched id (not the whole
+12,400 — only what infinite scroll has actually brought into the cache so
+far).
+
+One implementation note worth flagging: the checkbox's `onClick` originally
+called `preventDefault()` to fully own the toggle (since a shift-click can
+mean "select a whole range", not just this id). That desynced React's
+controlled `checked` from the actual DOM property — the card's own
+`.card--selected` styling was correct but the checkbox itself silently stayed
+unchecked, caught by scripted before/after checks of the DOM `checked`
+property, not just visual inspection. Fixed by letting the native toggle
+happen and capturing the modifier key in `onClick` for the `onChange` that
+follows in the same tick to read, rather than fighting the browser's default
+action.
 
 **Retry and backoff policy**
 

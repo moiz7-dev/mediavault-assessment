@@ -11,7 +11,7 @@ interface CardProps {
   asset: Asset;
   selected: boolean;
   active: boolean;
-  onToggleSelect: (id: string) => void;
+  onToggleSelect: (id: string, shiftKey: boolean) => void;
   onOpen: (id: string) => void;
 }
 
@@ -35,6 +35,7 @@ export const AssetCard = memo(function AssetCard({
 
   const [broken, setBroken] = useState(false);
   const showPlaceholder = !asset.hasThumbnail || broken;
+  const shiftKeyRef = useRef(false);
 
   return (
     <div
@@ -65,8 +66,14 @@ export const AssetCard = memo(function AssetCard({
         type="checkbox"
         className="card__check"
         checked={selected}
-        onClick={(e) => e.stopPropagation()}
-        onChange={() => onToggleSelect(asset.id)}
+        onClick={(e) => {
+          // Let the native toggle happen (fighting it with preventDefault desynced React's
+          // controlled `checked` from the DOM in testing) — just stop it opening the card,
+          // and stash the modifier key for the onChange that follows in the same tick.
+          e.stopPropagation();
+          shiftKeyRef.current = e.shiftKey;
+        }}
+        onChange={() => onToggleSelect(asset.id, shiftKeyRef.current)}
       />
     </div>
   );
@@ -76,7 +83,7 @@ interface Props {
   assets: Asset[];
   selectedIds: Set<string>;
   activeId: string | null;
-  onToggleSelect: (id: string) => void;
+  onToggleSelect: (id: string, shiftKey: boolean) => void;
   onOpen: (id: string) => void;
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
