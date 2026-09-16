@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { KeyboardEvent } from 'react';
 import { getAsset, thumbnailUrl, updateAsset } from '@/api/client';
 import { ApiError, friendlyMessage, isAbortError } from '@/api/errors';
 import { formatBytes, formatDate, formatDuration, statusLabel } from '@/lib/format';
@@ -19,6 +20,20 @@ export function AssetDetail({ id, isOnline, onClose, onSaved }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [conflictNotice, setConflictNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Moves focus into the panel as soon as it exists — not gated on the asset having loaded,
+  // so a slow or failing fetch doesn't leave focus stranded on whatever was behind the panel.
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+  }, []);
+
+  function handleKeyDown(e: KeyboardEvent<HTMLElement>) {
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      onClose();
+    }
+  }
 
   useEffect(() => {
     setAsset(null);
@@ -70,10 +85,12 @@ export function AssetDetail({ id, isOnline, onClose, onSaved }: Props) {
   }
 
   return (
-    <aside className="panel">
+    <aside className="panel" role="dialog" aria-label="Asset detail" onKeyDown={handleKeyDown}>
       <div className="panel__head">
         <h2>Asset detail</h2>
-        <button onClick={onClose}>Close</button>
+        <button ref={closeButtonRef} onClick={onClose}>
+          Close
+        </button>
       </div>
 
       {error && <p className="error">{error}</p>}

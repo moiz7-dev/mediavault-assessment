@@ -121,30 +121,44 @@ export function App() {
     setFilters({ status: next.join(',') });
   }
 
+  // baseSelectionRef snapshots the selection as of the last *non-shift* action, so a run of
+  // shift-click/shift-arrow extensions grows and shrinks relative to that same fixed point
+  // (moving back past the anchor un-selects) instead of only ever accumulating.
+  const baseSelectionRef = useRef<Set<string>>(new Set());
+
   const toggleSelect = useCallback((id: string, shiftKey: boolean) => {
     setSelectedIds((prev) => {
-      const next = new Set(prev);
       if (shiftKey && anchorIdRef.current) {
         const ids = itemsRef.current.map((a) => a.id);
         const from = ids.indexOf(anchorIdRef.current);
         const to = ids.indexOf(id);
         if (from !== -1 && to !== -1) {
           const [lo, hi] = from < to ? [from, to] : [to, from];
+          const next = new Set(baseSelectionRef.current);
           for (let i = lo; i <= hi; i++) next.add(ids[i]!);
           return next;
         }
       }
+      const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      baseSelectionRef.current = next;
+      anchorIdRef.current = id;
       return next;
     });
-    if (!shiftKey) anchorIdRef.current = id;
   }, []);
 
   const openAsset = useCallback((id: string) => setActiveId(id), []);
   const loadMore = useCallback(() => fetchNextPage(), [fetchNextPage]);
   const selectAllLoaded = useCallback(() => {
-    setSelectedIds(new Set(itemsRef.current.map((a) => a.id)));
+    const all = new Set(itemsRef.current.map((a) => a.id));
+    baseSelectionRef.current = all;
+    setSelectedIds(all);
+  }, []);
+  const clearSelection = useCallback(() => {
+    baseSelectionRef.current = new Set();
+    anchorIdRef.current = null;
+    setSelectedIds(new Set());
   }, []);
 
   async function applyBulkStatus(next: AssetStatus, idsOverride?: string[]) {
@@ -157,7 +171,9 @@ export function App() {
       setBulkOutcome({ status: next, succeededCount: result.succeededIds.length, failures: result.failures });
       // Leave only the still-unresolved (failed) ones selected — a visual "these still need
       // attention" cue, and lets the bulk bar itself serve as a second way to retry.
-      setSelectedIds(new Set(result.failures.map((f) => f.id)));
+      const stillSelected = new Set(result.failures.map((f) => f.id));
+      baseSelectionRef.current = stillSelected;
+      setSelectedIds(stillSelected);
     } finally {
       setBulkApplying(false);
     }
@@ -179,8 +195,31 @@ export function App() {
     : 0;
   const itemsById = useMemo(() => new Map(items.map((a) => [a.id, a])), [items]);
 
+  // A single polite live region for everything worth announcing. Deliberately keyed on the
+  // isLoading/isError *transition*, not on items/total directly — a background page load from
+  // scrolling (isFetchingNextPage) or a silent refetch must not re-announce on every page,
+  // only a genuine new search/filter result landing or failing.
+  const [announcement, setAnnouncement] = useState('');
+  useEffect(() => {
+    if (isError) setAnnouncement(friendlyMessage(error));
+    else if (!isLoading) setAnnouncement(`${items.length} of ${total.toLocaleString()} assets shown`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading, isError]);
+  useEffect(() => {
+    if (!bulkOutcome) return;
+    setAnnouncement(
+      `${bulkOutcome.succeededCount} set to ${statusLabel(bulkOutcome.status).toLowerCase()}${
+        bulkOutcome.failures.length > 0 ? `, ${bulkOutcome.failures.length} failed` : ''
+      }.`,
+    );
+  }, [bulkOutcome]);
+
   return (
     <div className="app">
+      <div className="sr-only" role="status" aria-live="polite">
+        {announcement}
+      </div>
+
       {!isOnline && (
         <p className="offline-banner" role="status">
           You're offline. We'll stop sending requests and pick back up automatically once
@@ -241,7 +280,7 @@ export function App() {
               Set {statusLabel(s).toLowerCase()}
             </button>
           ))}
-          <button disabled={bulkApplying} onClick={() => setSelectedIds(new Set())}>
+          <button disabled={bulkApplying} onClick={clearSelection}>
             Clear selection
           </button>
           {bulkApplying && <span className="muted">Applying…</span>}

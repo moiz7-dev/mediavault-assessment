@@ -121,6 +121,20 @@ script kept resolving to a row that was scrolled out of view. A raw
 position was fine all along. Memoizing the callbacks is still correct practice
 for `useVirtualizer` and is kept.
 
+Same class of false alarm turned up again in Task 5: testing "return focus to
+opener on close" by synthetically dispatching a click on `document.querySelector('.card')`
+found a real-looking scroll jump. The cause was the test, not the app —
+with only ~24 items loaded, overscan renders nearly every row regardless of
+scroll position, so `querySelector` (first DOM match) can return a card that's
+mounted but not actually visible, something a real mouse could never click.
+Re-tested by filtering to a card whose `getBoundingClientRect()` was actually
+within the scroll container's viewport (i.e. what a user could really click):
+scroll went 500 → 495 (the small, already-documented reflow from the panel
+narrowing the grid) → 500 exactly on close, with focus correctly landing back
+on that same card. Both false alarms share a lesson: a scripted a11y/behaviour
+check is only as good as whether it reproduces something a real user
+interaction could actually do.
+
 **Optimistic updates and rollback**
 
 Every selected id is patched to the new status directly in TanStack Query's
@@ -171,15 +185,20 @@ baseline defect #12, where `onSaved` was a documented no-op and the grid kept
 showing the stale row after an edit; confirmed the grid card's name/status
 update without a refetch after closing the panel.
 
-**Range selection:** click selects one id and sets it as the anchor;
-shift-click selects the contiguous range between the anchor and the clicked
-id (added to, not replacing, the existing selection — a plain checkbox click
-elsewhere shouldn't feel like it wiped out an unrelated prior selection). The
-anchor is a ref, not state, so `toggleSelect` keeps one stable identity across
-renders — required for `AssetCard`'s memo to keep working during a selection
-change. "Select all loaded" selects every currently-fetched id (not the whole
-12,400 — only what infinite scroll has actually brought into the cache so
-far).
+**Range selection:** click (or Space, keyboard) selects one id and sets it as
+the anchor; shift-click or Shift+arrow selects the contiguous range between
+the anchor and the target, *added to* whatever was selected as of that last
+plain action, not the live selection — a `baseSelectionRef` snapshot taken at
+that moment. That distinction matters once keyboard entered the picture in
+Task 5: without it, Shift+arrow could only ever grow the selection, because
+each step would union against a selection that already included the previous
+step's range. Snapshotting the base means moving back the other way correctly
+shrinks the range again — verified: Space, then Shift+Right ×2 → 3 selected,
+then Shift+Left → 2 selected. Both anchor and base live in refs, not state, so
+`toggleSelect` keeps one stable identity across renders — required for
+`AssetCard`'s memo to keep working during a selection change. "Select all
+loaded" selects every currently-fetched id (not the whole 12,400 — only what
+infinite scroll has actually brought into the cache so far).
 
 One implementation note worth flagging: the checkbox's `onClick` originally
 called `preventDefault()` to fully own the toggle (since a shift-click can
@@ -289,9 +308,47 @@ patched over in the view.
 
 ## Accessibility
 
-- Keyboard model you implemented, in one paragraph.
-- How you tested it, including any screen reader.
-- Known gaps.
+**Keyboard model.** The grid is `role="grid"` with a single roving tabindex
+over the loaded assets: one card is `tabindex="0"` at a time (verified
+scripted — exactly one `[role="gridcell"][tabindex="0"]` exists no matter how
+many are loaded), everything else is `-1`, so Tab is one stop in and one stop
+out rather than thousands. Inside the grid: arrow keys move the roving focus
+by one card (or by the current column count for up/down), Enter opens the
+detail panel, Space toggles the focused card's selection, and Shift+arrow
+extends *or shrinks* a range from the last plain-selected anchor (shrinking
+needed its own snapshot — see "Range selection" above; a naive version could
+only grow). Moving focus past what's currently virtualized asks the
+virtualizer to scroll that row into view, then focuses the card once it
+actually exists in the DOM (polled a few animation frames, not assumed
+synchronous). Opening the panel moves focus to its Close button; Escape or
+Close both return focus to the exact card that opened it, and a filter/search
+change that shrinks the list re-clamps focus instead of leaving it pointing
+at a row that no longer exists. Checkboxes are `tabindex="-1"` (mouse-clickable,
+not an extra Tab stop) with their own `aria-label`; each gridcell carries an
+`aria-label` combining name, status and selection state, and `aria-selected`
+for assistive tech to track selection independent of the checkbox's own
+label. A single `aria-live="polite"` region announces result counts and bulk
+outcomes — deliberately keyed on the *loading-finished* transition, not on
+every render, so background pagination and refetches stay silent and it never
+fires once per keystroke.
+
+**How tested.** Entirely via scripted checks against the real accessibility
+tree (Playwright reading `role`/`aria-*`/`document.activeElement`, not just
+pixels) — confirmed the roving-tabindex count, arrow/Enter/Escape/Space
+behaviour, focus landing on Close on open and on the exact opener card on
+close, and the live region's text at the moments it's supposed to update.
+**I did not run a screen reader (NVDA/VoiceOver/JAWS) against it** — the
+semantics are real and match the WAI-ARIA grid pattern, but I haven't heard
+it read aloud, so I'm not claiming a pass I didn't observe.
+
+**Known gaps.** No screen-reader audio pass (above). Shift+arrow range
+extension is relative to the last plain click/Space, not full "grow into
+column below" grid-selection semantics some spreadsheets implement — a
+simpler, still-correct choice for a gallery-style grid. The detail panel is a
+non-modal dialog (`role="dialog"`, no focus trap, per the brief) — a
+keyboard-only user can Tab out of it into the page behind, which is
+intentional here but worth calling out as a deliberate choice, not an
+oversight.
 
 ---
 

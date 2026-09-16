@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import type { KeyboardEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { thumbnailUrl } from '@/api/client';
 import { formatBytes, formatDate, statusLabel } from '@/lib/format';
@@ -9,10 +10,14 @@ const GAP = 12;
 
 interface CardProps {
   asset: Asset;
+  index: number;
+  tabIndex: 0 | -1;
   selected: boolean;
   active: boolean;
   onToggleSelect: (id: string, shiftKey: boolean) => void;
-  onOpen: (id: string) => void;
+  onOpen: (index: number) => void;
+  onFocusCard: (index: number) => void;
+  registerRef: (index: number, el: HTMLDivElement | null) => void;
 }
 
 /**
@@ -22,10 +27,14 @@ interface CardProps {
  */
 export const AssetCard = memo(function AssetCard({
   asset,
+  index,
+  tabIndex,
   selected,
   active,
   onToggleSelect,
   onOpen,
+  onFocusCard,
+  registerRef,
 }: CardProps) {
   if (import.meta.env.DEV) {
     const w = window as unknown as { __mvRenderCounts?: Map<string, number> };
@@ -39,8 +48,14 @@ export const AssetCard = memo(function AssetCard({
 
   return (
     <div
+      ref={(el) => registerRef(index, el)}
       className={'card' + (selected ? ' card--selected' : '') + (active ? ' card--active' : '')}
-      onClick={() => onOpen(asset.id)}
+      role="gridcell"
+      tabIndex={tabIndex}
+      aria-selected={selected}
+      aria-label={`${asset.name}, ${statusLabel(asset.status)}${selected ? ', selected' : ''}`}
+      onFocus={() => onFocusCard(index)}
+      onClick={() => onOpen(index)}
     >
       {showPlaceholder ? (
         <div className="card__thumb card__thumb--placeholder" aria-hidden="true">
@@ -65,6 +80,8 @@ export const AssetCard = memo(function AssetCard({
       <input
         type="checkbox"
         className="card__check"
+        tabIndex={-1}
+        aria-label={`Select ${asset.name}`}
         checked={selected}
         onClick={(e) => {
           // Let the native toggle happen (fighting it with preventDefault desynced React's
@@ -95,6 +112,11 @@ interface Props {
  * bounded by viewport size regardless of how many of the 12,400 assets have been fetched.
  * Row height is measured (not guessed), so real content never causes layout shift once
  * placed — only the very first paint of a row uses `estimateSize` as a placeholder.
+ *
+ * Keyboard model: a single roving tabindex over `assets` (one card is tabbable at a time;
+ * Tab moves in and out of the grid as one stop, arrows move within it). Moving focus past the
+ * edge of what's currently mounted asks the virtualizer to scroll that row into view first,
+ * then focuses the card once it exists in the DOM.
  */
 export function AssetGrid({
   assets,
@@ -149,6 +171,126 @@ export function AssetGrid({
     }
   }, [lastRenderedIndex, rowCount, hasNextPage, isFetchingNextPage, onLoadMore]);
 
+  // --- Keyboard / roving tabindex -----------------------------------------------------
+  const assetsRef = useRef(assets);
+  assetsRef.current = assets;
+  const [focusedIndex, setFocusedIndex] = useState(0);
+  const cardNodesRef = useRef(new Map<number, HTMLDivElement>());
+  const pendingFocusRef = useRef<number | null>(null);
+  const lastOpenerIndexRef = useRef<number | null>(null);
+
+  const registerRef = useCallback((index: number, el: HTMLDivElement | null) => {
+    if (el) cardNodesRef.current.set(index, el);
+    else cardNodesRef.current.delete(index);
+  }, []);
+
+  const focusIndexWhenMounted = useCallback((index: number) => {
+    pendingFocusRef.current = index;
+    let attempts = 0;
+    const tryFocus = () => {
+      const node = cardNodesRef.current.get(index);
+      if (node) {
+        node.focus();
+        pendingFocusRef.current = null;
+        return;
+      }
+      attempts += 1;
+      if (attempts < 12) requestAnimationFrame(tryFocus);
+    };
+    tryFocus();
+  }, []);
+
+  const openIndex = useCallback(
+    (index: number) => {
+      const asset = assetsRef.current[index];
+      if (!asset) return;
+      lastOpenerIndexRef.current = index;
+      onOpen(asset.id);
+    },
+    [onOpen],
+  );
+
+  const moveFocus = useCallback(
+    (rawIndex: number, extendSelection: boolean) => {
+      const list = assetsRef.current;
+      const index = Math.max(0, Math.min(list.length - 1, rawIndex));
+      setFocusedIndex(index);
+      rowVirtualizer.scrollToIndex(Math.floor(index / columns), { align: 'auto' });
+      focusIndexWhenMounted(index);
+      if (extendSelection) {
+        const asset = list[index];
+        if (asset) onToggleSelect(asset.id, true);
+      }
+    },
+    [columns, focusIndexWhenMounted, onToggleSelect, rowVirtualizer],
+  );
+
+  const handleFocusCard = useCallback((index: number) => setFocusedIndex(index), []);
+
+  function handleGridKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    switch (e.key) {
+      case 'ArrowRight':
+        e.preventDefault();
+        moveFocus(focusedIndex + 1, e.shiftKey);
+        break;
+      case 'ArrowLeft':
+        e.preventDefault();
+        moveFocus(focusedIndex - 1, e.shiftKey);
+        break;
+      case 'ArrowDown':
+        e.preventDefault();
+        moveFocus(focusedIndex + columns, e.shiftKey);
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        moveFocus(focusedIndex - columns, e.shiftKey);
+        break;
+      case 'Enter':
+        e.preventDefault();
+        openIndex(focusedIndex);
+        break;
+      case ' ':
+      case 'Spacebar': {
+        e.preventDefault();
+        const asset = assetsRef.current[focusedIndex];
+        if (asset) onToggleSelect(asset.id, e.shiftKey);
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  // Return focus to the card that opened the panel once it closes (any way it closes). No
+  // scrollToIndex here on purpose: closing the panel returns the grid to the width (and so the
+  // same column count and scroll position) it had before opening, so the card is already where
+  // it was — forcing a scroll using `columns` here raced the ResizeObserver that updates it for
+  // the just-reverted width, computing the wrong row and discarding the preserved scroll offset.
+  useEffect(() => {
+    if (activeId !== null || lastOpenerIndexRef.current === null) return;
+    const index = lastOpenerIndexRef.current;
+    lastOpenerIndexRef.current = null;
+    setFocusedIndex(index);
+    focusIndexWhenMounted(index);
+  }, [activeId, focusIndexWhenMounted]);
+
+  // A genuinely new result set (filter/search/sort changed, not just another page loading in)
+  // resets keyboard focus and scroll to the top — detected by the first id changing, since
+  // pagination only ever appends past the end.
+  const firstAssetIdRef = useRef<string | undefined>(assets[0]?.id);
+  useEffect(() => {
+    if (assets[0]?.id !== firstAssetIdRef.current) {
+      firstAssetIdRef.current = assets[0]?.id;
+      setFocusedIndex(0);
+      if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    } else if (focusedIndex > assets.length - 1) {
+      // The list shrank under the current focus (e.g. a filter now excludes it) — move focus
+      // to the new last item rather than leaving it pointing at a row that no longer exists.
+      setFocusedIndex(Math.max(0, assets.length - 1));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assets]);
+
   if (assets.length === 0) {
     return (
       <div className="empty">
@@ -159,7 +301,14 @@ export function AssetGrid({
   }
 
   return (
-    <div className="grid-scroll" ref={scrollRef}>
+    <div
+      className="grid-scroll"
+      ref={scrollRef}
+      role="grid"
+      aria-label="Assets"
+      aria-multiselectable="true"
+      onKeyDown={handleGridKeyDown}
+    >
       <div style={{ height: rowVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
         {virtualRows.map((virtualRow) => {
           const isLoaderRow = virtualRow.index >= rowCount;
@@ -171,6 +320,7 @@ export function AssetGrid({
               ref={rowVirtualizer.measureElement}
               data-index={virtualRow.index}
               className="grid-row"
+              role={isLoaderRow ? undefined : 'row'}
               style={{
                 position: 'absolute',
                 top: 0,
@@ -183,16 +333,23 @@ export function AssetGrid({
               {isLoaderRow ? (
                 <p className="grid-loading-more muted">Loading more…</p>
               ) : (
-                rowItems.map((asset) => (
-                  <AssetCard
-                    key={asset.id}
-                    asset={asset}
-                    selected={selectedIds.has(asset.id)}
-                    active={activeId === asset.id}
-                    onToggleSelect={onToggleSelect}
-                    onOpen={onOpen}
-                  />
-                ))
+                rowItems.map((asset, i) => {
+                  const index = start + i;
+                  return (
+                    <AssetCard
+                      key={asset.id}
+                      asset={asset}
+                      index={index}
+                      tabIndex={index === focusedIndex ? 0 : -1}
+                      selected={selectedIds.has(asset.id)}
+                      active={activeId === asset.id}
+                      onToggleSelect={onToggleSelect}
+                      onOpen={openIndex}
+                      onFocusCard={handleFocusCard}
+                      registerRef={registerRef}
+                    />
+                  );
+                })
               )}
             </div>
           );
