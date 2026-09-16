@@ -124,6 +124,15 @@ button:disabled {
   color: var(--danger);
 }
 
+.offline-banner {
+  margin: 0;
+  padding: 8px 16px;
+  font-size: 13px;
+  text-align: center;
+  background: #fff4e0;
+  border-bottom: 1px solid #ecd3a2;
+}
+
 .bulk-outcome {
   padding: 10px 16px;
   font-size: 13px;

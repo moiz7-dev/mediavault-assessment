@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { friendlyMessage } from '@/api/errors';
+import { ErrorBoundary } from '@/ErrorBoundary';
 import { patchAssetsInCache } from '@/features/assets/assetCache';
 import { AssetDetail } from '@/features/assets/AssetDetail';
 import { AssetGrid } from '@/features/assets/AssetGrid';
 import { useAssetsQuery } from '@/features/assets/useAssetsQuery';
 import { useBulkStatus, type BulkFailure } from '@/features/assets/useBulkStatus';
 import { useDebouncedValue } from '@/lib/useDebouncedValue';
+import { useOnlineStatus } from '@/lib/useOnlineStatus';
 import { useUrlState } from '@/lib/useUrlState';
 import { statusLabel } from '@/lib/format';
 import type { Asset, AssetStatus, AssetQuery } from '@/lib/types';
@@ -53,6 +55,7 @@ function describeBulkFailure(code: string): string {
 }
 
 export function App() {
+  const isOnline = useOnlineStatus();
   const [filters, setFilters] = useUrlState(URL_DEFAULTS);
 
   // The input box updates instantly; only the debounced value feeds the URL and the API,
@@ -178,6 +181,13 @@ export function App() {
 
   return (
     <div className="app">
+      {!isOnline && (
+        <p className="offline-banner" role="status">
+          You're offline. We'll stop sending requests and pick back up automatically once
+          you're back.
+        </p>
+      )}
+
       <header className="topbar">
         <h1>MediaVault</h1>
         <input
@@ -227,7 +237,7 @@ export function App() {
         <div className="bulkbar">
           <span>{selectedIds.size} selected</span>
           {STATUSES.map((s) => (
-            <button key={s} disabled={bulkApplying} onClick={() => applyBulkStatus(s)}>
+            <button key={s} disabled={bulkApplying || !isOnline} onClick={() => applyBulkStatus(s)}>
               Set {statusLabel(s).toLowerCase()}
             </button>
           ))}
@@ -255,7 +265,7 @@ export function App() {
                 {bulkOutcome.failures.length > 8 && <li>and {bulkOutcome.failures.length - 8} more…</li>}
               </ul>
               {retryableFailureCount > 0 && (
-                <button disabled={bulkApplying} onClick={retryFailed}>
+                <button disabled={bulkApplying || !isOnline} onClick={retryFailed}>
                   Retry {retryableFailureCount} failed
                 </button>
               )}
@@ -276,19 +286,28 @@ export function App() {
             <p className="muted">Loading assets…</p>
           </div>
         ) : (
-          <AssetGrid
-            assets={items}
-            selectedIds={selectedIds}
-            activeId={activeId}
-            onToggleSelect={toggleSelect}
-            onOpen={openAsset}
-            hasNextPage={!!hasNextPage}
-            isFetchingNextPage={isFetchingNextPage}
-            onLoadMore={loadMore}
-          />
+          <ErrorBoundary fallbackMessage="The grid hit a snag showing these assets.">
+            <AssetGrid
+              assets={items}
+              selectedIds={selectedIds}
+              activeId={activeId}
+              onToggleSelect={toggleSelect}
+              onOpen={openAsset}
+              hasNextPage={!!hasNextPage}
+              isFetchingNextPage={isFetchingNextPage}
+              onLoadMore={loadMore}
+            />
+          </ErrorBoundary>
         )}
         {activeId && (
-          <AssetDetail id={activeId} onClose={() => setActiveId(null)} onSaved={handleSaved} />
+          <ErrorBoundary fallbackMessage="This asset's details hit a snag.">
+            <AssetDetail
+              id={activeId}
+              isOnline={isOnline}
+              onClose={() => setActiveId(null)}
+              onSaved={handleSaved}
+            />
+          </ErrorBoundary>
         )}
       </main>
     </div>

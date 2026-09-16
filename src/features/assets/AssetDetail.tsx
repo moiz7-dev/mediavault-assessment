@@ -1,18 +1,20 @@
 import { useEffect, useState } from 'react';
 import { getAsset, thumbnailUrl, updateAsset } from '@/api/client';
-import { ApiError, friendlyMessage } from '@/api/errors';
+import { ApiError, friendlyMessage, isAbortError } from '@/api/errors';
 import { formatBytes, formatDate, formatDuration, statusLabel } from '@/lib/format';
+import { withRetry } from '@/lib/retry';
 import type { Asset, AssetStatus } from '@/lib/types';
 
 const STATUSES: AssetStatus[] = ['draft', 'in_review', 'approved', 'archived'];
 
 interface Props {
   id: string;
+  isOnline: boolean;
   onClose: () => void;
   onSaved: (asset: Asset) => void;
 }
 
-export function AssetDetail({ id, onClose, onSaved }: Props) {
+export function AssetDetail({ id, isOnline, onClose, onSaved }: Props) {
   const [asset, setAsset] = useState<Asset | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [conflictNotice, setConflictNotice] = useState<string | null>(null);
@@ -22,9 +24,17 @@ export function AssetDetail({ id, onClose, onSaved }: Props) {
     setAsset(null);
     setError(null);
     setConflictNotice(null);
-    getAsset(id)
+    const controller = new AbortController();
+    // Retried here (not just relying on a query hook) because a stale-response race on close
+    // + reopen is the same class of bug Task 1 fixed for search — closing and reopening the
+    // panel quickly must not let an earlier asset's slow response land after the current one.
+    withRetry(() => getAsset(id, controller.signal))
       .then(setAsset)
-      .catch((err: unknown) => setError(friendlyMessage(err)));
+      .catch((err: unknown) => {
+        if (isAbortError(err)) return;
+        setError(friendlyMessage(err));
+      });
+    return () => controller.abort();
   }, [id]);
 
   async function setStatus(status: AssetStatus) {
@@ -33,7 +43,7 @@ export function AssetDetail({ id, onClose, onSaved }: Props) {
     setError(null);
     setConflictNotice(null);
     try {
-      const updated = await updateAsset(asset.id, asset.version, { status });
+      const updated = await withRetry(() => updateAsset(asset.id, asset.version, { status }));
       setAsset(updated);
       onSaved(updated);
     } catch (err) {
@@ -116,7 +126,7 @@ export function AssetDetail({ id, onClose, onSaved }: Props) {
             {STATUSES.map((status) => (
               <button
                 key={status}
-                disabled={saving || status === asset.status}
+                disabled={saving || status === asset.status || !isOnline}
                 onClick={() => setStatus(status)}
               >
                 {statusLabel(status)}

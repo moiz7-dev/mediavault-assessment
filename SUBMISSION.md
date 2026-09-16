@@ -202,8 +202,42 @@ it: `retryDelay` honours `Retry-After` exactly (plus a small jitter) when the
 server gives one, otherwise exponential backoff with equal jitter (50-100% of
 `min(500 * 2^attempt, 8000)`ms); `retry` checks `ApiError.retryable`, which is
 computed structurally from HTTP status (`429`/`503`/`500` only) in
-`api/errors.ts` — never from message text. Capped at 4 attempts. Task 4 extends
-this to mutations, offline detection, and an error boundary.
+`api/errors.ts` — never from message text. Capped at 4 attempts.
+
+`lib/retry.ts` extracts the same policy (`shouldRetry`/`backoffDelay`) into a
+standalone `withRetry(fn)` for the two write paths that don't go through
+`useQuery`/`useMutation`: the bulk-status chunks (Task 3) and, now, the
+single-asset load and save in `AssetDetail` — the baseline never retried a
+`500 write_failed` on save even though `API.md` documents it as safe to
+retry, and the detail load had no cancellation at all (closing and reopening
+the panel quickly could let a stale asset's response land after the current
+one — the same class of race Task 1 fixed for search, now fixed here with an
+`AbortController` in the same effect).
+
+**Offline handling.** TanStack Query already pauses queries while
+`navigator.onLine` is false and resumes them on reconnect (default
+`networkMode: 'online'`) — `useOnlineStatus` (a thin wrapper on the
+`online`/`offline` window events) is mainly there to *tell* the user, via a
+persistent banner, and to gate the two raw-`fetch` write paths (bulk status,
+single-asset save) that aren't covered by that automatic pause. Verified with
+Playwright's `context.setOffline`: the banner appeared immediately, typing a
+new search while offline produced no repeated request storm (one attempt,
+then silence — retries correctly wait rather than burning the budget while
+offline), and reconnecting made the banner disappear and querying resume
+without user action. Bulk-action and single-asset status buttons are
+disabled while offline rather than left to fail and report an error — no
+value in letting the user fire a request we already know will fail.
+**Queueing writes made while offline is a cut, not a requirement** — see
+Trade-offs.
+
+**Error boundary.** `ErrorBoundary` (a small class component, `main.tsx`)
+wraps the whole app once as a last resort, and `App.tsx` wraps `AssetGrid` and
+`AssetDetail` each in their own instance so a failure in one can't blank the
+other or the header/search. Verified by temporarily throwing inside
+`AssetCard` for a real, currently-loaded asset id: the grid showed "The grid
+hit a snag showing these assets." with a "Try again" button, while the search
+box stayed fully interactive — confirmed via a scripted check that it was
+still typeable, not just visually present.
 
 **State placement and URL sync**
 
