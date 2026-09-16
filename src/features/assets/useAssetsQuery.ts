@@ -1,28 +1,30 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
 import { listAssets } from '@/api/client';
 import type { AssetQuery } from '@/lib/types';
 
 /**
- * First page of results for the current filters.
+ * Cursor-paginated results for the current filters, loaded incrementally.
  *
- * Cancellation: the `signal` TanStack Query hands the queryFn is forwarded to `fetch`.
- * When `query` changes (filters/search/sort), this query's cache key changes too, so the
- * previous key loses its only observer and TanStack Query aborts that in-flight fetch —
- * a slow response for an old query can never land after a newer one.
+ * `query` never carries a cursor — each distinct filter/sort combination gets its own
+ * infinite-query cache entry starting from an empty page list. That's what makes
+ * `stale_cursor` structurally unreachable: switching filters can't accidentally reuse a
+ * cursor from a different query because the old query's pages live under a different key
+ * entirely, not because we remembered to clear something.
  *
- * De-duplication: two callers requesting the same key share one in-flight fetch; React's
- * StrictMode double-invoke in dev exercises exactly this path.
- *
- * `placeholderData: keepPreviousData` keeps the previous page on screen while a new query
- * is in flight instead of flashing to empty — `isFetching` distinguishes "showing stale
- * data while refreshing" from "this data is final" so the UI never claims a finished state
- * it hasn't reached, and `isPlaceholderData` tells the grid the rows it's showing belong to
- * the previous query, not this one.
+ * See useAssetsQuery's sibling note in App.tsx / SUBMISSION.md for cancellation and
+ * de-duplication, which apply identically here.
  */
 export function useAssetsQuery(query: AssetQuery) {
-  return useQuery({
+  const infinite = useInfiniteQuery({
     queryKey: ['assets', query],
-    queryFn: ({ signal }) => listAssets(query, signal),
+    queryFn: ({ pageParam, signal }) => listAssets({ ...query, cursor: pageParam }, signal),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     placeholderData: keepPreviousData,
   });
+
+  const items = infinite.data?.pages.flatMap((page) => page.items) ?? [];
+  const total = infinite.data?.pages[0]?.total ?? 0;
+
+  return { ...infinite, items, total };
 }

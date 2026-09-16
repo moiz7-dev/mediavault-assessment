@@ -97,7 +97,33 @@ longer wanted" requests from continuing to burn the 80-req/10s budget.
 
 **Virtualization approach**
 
-*(Task 2)*
+Row-based, via `@tanstack/react-virtual`, wrapping `useInfiniteQuery`'s cursor
+pagination: each virtual "row" is a CSS grid strip of N cards (N computed from
+container width via `ResizeObserver`, matching the old `auto-fill` behaviour),
+absolutely positioned with a measured (not guessed) height via
+`measureElement`, so real content never causes layout shift once placed — only
+a row's very first paint uses the `estimateSize` guess. A sentinel "loading
+more" row is appended to the virtual count whenever `hasNextPage` is true;
+fetching the next page is triggered by an effect keyed on the *primitive*
+index of the last rendered row, not the row object itself — an early version
+kept the row object in the effect's dependency array, and since
+`getVirtualItems()` returns a new array/objects on every call, that re-ran the
+effect (and could re-fire `fetchNextPage`) on every unrelated render, not just
+when the visible range actually changed.
+
+`getScrollElement`/`estimateSize` are memoized with `useCallback`. During
+development an unmemoized version briefly looked like it was resetting scroll
+position to 0 on every re-render; that turned out to be a false alarm from the
+*test tooling*, not the app — Playwright's `locator.click()` auto-scrolls its
+target into view before clicking, and the checkbox/card `.first()` in my test
+script kept resolving to a row that was scrolled out of view. A raw
+`element.click()` in the page (no test-driver scrolling) proved scroll
+position was fine all along. Memoizing the callbacks is still correct practice
+for `useVirtualizer` and is kept.
+
+**Optimistic updates and rollback**
+
+*(Task 3)*
 
 **Optimistic updates and rollback**
 
@@ -133,17 +159,34 @@ the sort dropdown and the filtered/sorted rows exactly.
 
 ## Performance
 
-Fill in real measurements, not estimates. Say which machine and browser.
+Measured via a scripted Playwright session (Chromium, headless) driving the
+real dev app with chaos/latency on, not the browser's own DevTools UI — see
+"How measured" per row. Windows 11, local dev server.
 
 | Metric | Before | After | How measured |
 | --- | --- | --- | --- |
-| Rendered DOM nodes at 5,000 rows loaded | | | |
-| Cards re-rendered when toggling one selection | | | |
-| Longest task during sustained scroll | | | |
-| Requests fired while typing a 6-character query | | | |
-| Production bundle, gzipped | | | |
+| Rendered DOM nodes at 5,000+ rows loaded | N/A — baseline had no pagination past the first 24 rows at all (defect #6), so it never reaches this state | **~190 total DOM nodes**, flat, at 5,448 rows loaded | Scripted repeated `scrollTop = scrollHeight` + wait, reading `document.querySelectorAll('*').length` and `.card` count every 20 iterations. Card count stayed at 21-36 and total DOM nodes at 189-299 continuously from 168 through 5,448 loaded rows |
+| Cards re-rendered when toggling one selection | All mounted cards (`AssetGrid` had no memo boundary, no stable callbacks) — not independently re-measured on the old code, stated qualitatively rather than guessed a number | **1 of 21** mounted cards | Dev-only counter (`window.__mvRenderCounts`, guarded by `import.meta.env.DEV`) incremented in `AssetCard`'s render body, read before/after a real checkbox click. Only the toggled card's count changed; all 20 others were bit-for-bit identical |
+| Longest task during sustained scroll | Not measured — same N/A as above (feature didn't exist to stress) | **0 tasks over 50ms** across a 150-step sustained scroll with 2,208+ rows loaded | `PerformanceObserver({type:'longtask'})` recording during a scripted incremental scroll (60px/16ms steps, ~150 steps) |
+| Requests fired while typing a 6-character query | **6** (one per keystroke — no debounce) | **1** | Counted `request` events matching `/api/assets\?` while typing "camera" at a 60ms/char cadence (well under the 400ms debounce window) |
+| Production bundle, gzipped | 48 kB (stated baseline) | **~70.5 kB** (69.32 kB JS + 1.23 kB CSS) | `npm run build` output |
 
-What was the actual bottleneck, and how did you find it?
+The bundle grew about 22.5 kB over baseline — entirely TanStack Query +
+TanStack Virtual. That's a real jump and worth justifying rather than waving
+away: both libraries are doing exactly the work Tasks 1 and 2 require
+regardless of who writes it — cancellation, de-duplication, structural
+retry/backoff, cursor-safe cache keys, and row virtualization with measured
+heights. Hand-rolling equivalents would likely cost similar bytes eventually
+and, with much higher confidence, more bugs; I'd rather spend the 22.5 kB than
+debug a hand-rolled `AbortController` cache.
+
+**What was the actual bottleneck, and how did you find it?** Two, both found
+before writing any UI code, from reading the baseline against `API.md`: (1)
+unbounded DOM growth, since the baseline never paginated past 24 rows at all,
+so "5,000 rows" was structurally impossible before Task 2; (2) request volume,
+since every keystroke firing a request would exhaust the 80-req/10s budget on
+its own well before any real usage. Both are fixed at the data-layer, not
+patched over in the view.
 
 ---
 

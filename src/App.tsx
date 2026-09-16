@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { bulkSetStatus } from '@/api/client';
 import { friendlyMessage } from '@/api/errors';
 import { AssetDetail } from '@/features/assets/AssetDetail';
@@ -58,11 +58,15 @@ export function App() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const {
-    data,
+    items,
+    total,
     isLoading,
     isError,
     error,
     isFetching,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
     refetch,
   } = useAssetsQuery({
     q: debouncedQ || undefined,
@@ -71,21 +75,21 @@ export function App() {
     limit: 24,
   });
 
-  const items = data?.items ?? [];
-  const total = data?.total ?? 0;
-
   function setStatusFilter(next: AssetStatus[]) {
     setFilters({ status: next.join(',') });
   }
 
-  function toggleSelect(id: string) {
+  const toggleSelect = useCallback((id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  }
+  }, []);
+
+  const openAsset = useCallback((id: string) => setActiveId(id), []);
+  const loadMore = useCallback(() => fetchNextPage(), [fetchNextPage]);
 
   async function applyBulkStatus(next: AssetStatus) {
     const ids = [...selectedIds];
@@ -143,7 +147,9 @@ export function App() {
         <span className="muted">
           {isLoading
             ? 'Loading…'
-            : `${items.length} of ${total.toLocaleString()} shown${isFetching ? ' · Updating…' : ''}`}
+            : `${items.length} of ${total.toLocaleString()} shown${
+                isFetching && !isFetchingNextPage ? ' · Updating…' : ''
+              }`}
         </span>
       </div>
 
@@ -177,7 +183,10 @@ export function App() {
             selectedIds={selectedIds}
             activeId={activeId}
             onToggleSelect={toggleSelect}
-            onOpen={setActiveId}
+            onOpen={openAsset}
+            hasNextPage={!!hasNextPage}
+            isFetchingNextPage={isFetchingNextPage}
+            onLoadMore={loadMore}
           />
         )}
         {activeId && (

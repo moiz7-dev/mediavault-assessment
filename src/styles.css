@@ -130,14 +130,24 @@ button:disabled {
   min-height: 0;
 }
 
-.grid {
+.grid-scroll {
   flex: 1;
   overflow: auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
+  position: relative;
   padding: 16px;
-  align-content: start;
+}
+
+.grid-row {
+  display: grid;
+  gap: 12px;
+  padding-bottom: 12px;
+  box-sizing: border-box;
+}
+
+.grid-loading-more {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 8px 0 0;
 }
 
 .card {
@@ -161,6 +171,12 @@ button:disabled {
   aspect-ratio: 16 / 10;
   object-fit: cover;
   background: var(--bg-soft);
+}
+.card__thumb--placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--bg-soft), var(--line));
 }
 .card__body {
   padding: 8px 10px 10px;
