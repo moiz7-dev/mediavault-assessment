@@ -8,6 +8,15 @@ chose not to do something.
 
 **Link:** https://drive.google.com/file/d/1qN7N_qFpalzgxjDP3dQYgjX2P_Y_ERUS/view?usp=sharing
 
+## Deployed link
+
+Not provided. The mock API keeps all state in one running process's memory
+(assets, rate limits, live updates) — serverless hosts like Vercel/Netlify
+don't share memory across requests, so it'd break unless I rewrote `server/`,
+which the brief says not to do. Verified locally instead with chaos on.
+Happy to deploy to a platform that runs a persistent Node process if that's
+wanted.
+
 ---
 
 ## How to run it
