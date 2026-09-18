@@ -20,7 +20,18 @@ build.
 
 ## Time spent
 
-Roughly, and how you split it.
+Roughly 10-12 hours, spread across 3 days (Sep 16-18). Built with Claude
+Code — I worked through the tasks one at a time, reviewed each
+implementation against the running app before moving on, made the judgment
+calls (library choices, the 400ms debounce interval, the 409-conflict
+behaviour, scope cuts), and verified behaviour myself rather than accepting
+it blind. Roughly how it split: Task 0-2 (defect inventory, search
+correctness, virtualized scale) took the largest share, including tracking
+down two subtle bugs that looked real but turned out to be test-script
+artifacts, not app bugs. Task 3-4 (bulk actions, resilience) a solid chunk.
+Task 5-6 (keyboard/screen reader, visual design) less, since a lot of the
+groundwork (retry policy, error handling) was already in place from earlier
+tasks.
 
 ---
 
